@@ -1,0 +1,71 @@
+Phase 0 — Baseline + guardrails (same day)
+Freeze behavior: run the app, click through core flows (register/login, submit request, mentor/advisor/HOD approvals, status, PDF, notifications).
+Add a “known-good” way to run it: README with one command for dev + required env vars.
+Create a dependency lock: add requirements.txt (or pyproject.toml) with pinned versions.
+Deliverable: anyone can run it reliably; no “works on my machine”.
+Phase 1 — Production safety (1–2 days)
+Turn off debug in prod: debug=False, no Werkzeug dev server.
+Use a real WSGI server:
+Windows: Waitress
+Linux: Gunicorn
+Configuration via environment only:
+SECRET_KEY must be set in prod (no default fallback)
+DB creds must be env-only (no ram123 defaults in prod)
+Secure cookies for HTTPS: SESSION_COOKIE_SECURE=True, proper SameSite, set HSTS behind reverse proxy.
+Stop logging sensitive session/user data (some debug logs currently dump session contents).
+Deliverable: safe to deploy without accidental insecure defaults.
+Phase 2 — Database correctness + migrations (2–4 days)
+Introduce real migrations (Flask-Migrate/Alembic) and remove ad-hoc schema mutation over time.
+Enforce constraints + indexes (performance + integrity):
+indexes on requests(user_id, created_at), requests(status, department), notifications(user_id, is_read, created_at)
+Normalize “department” (either store a normalized column or enforce consistent input) so you can delete the huge repeated SQL REPLACE(REPLACE(...)) logic.
+Deliverable: schema changes are deterministic, reviewable, and fast.
+Phase 3 — Auth + authorization hardening (2–5 days)
+Make one auth system: choose Flask-Login or session-only (recommend Flask-Login + current_user everywhere).
+Centralize role checks (decorators like @role_required('Mentor')) instead of repeating if session.get('role') != ....
+Strict authorization rules on every action:
+A mentor/advisor/HOD can only act on requests they’re allowed to see (department + status transitions).
+Password & account security:
+remove plaintext login fallback entirely for prod
+add password reset flow (email or admin reset)
+Deliverable: no privilege escalation paths, consistent access control.
+Phase 4 — Web security: CSRF, input validation, headers (2–4 days)
+Enable CSRF on all state-changing POSTs (remove @csrf.exempt except very specific API endpoints with tokens).
+Validate all inputs with forms/schemas (WTForms/Pydantic):
+dates, enums, lengths, required fields
+server-side canonicalization (department, year, student_type)
+Security headers (CSP, X-Frame-Options/frame-ancestors, Referrer-Policy).
+Safer PDF generation: ensure content is sanitized and bounded; handle missing fonts cleanly.
+Deliverable: passes a basic security review.
+Phase 5 — Reliability + observability (2–4 days)
+Structured logging (request id, user id, endpoint, latency).
+Proper error handling:
+consistent 4xx vs 5xx
+user-friendly error pages
+Health checks:
+/healthz should not create DB writes; add /readyz for DB connectivity if needed.
+Rate limiter storage: move from memory:// to Redis for real deployments (multi-worker safe).
+Deliverable: deployable with monitoring and predictable behavior under load.
+Phase 6 — Refactor for maintainability (3–7 days, but huge payoff)
+Split app.py into:
+app/_init_.py (app factory)
+app/routes/*.py (blueprints)
+app/models.py (DB layer)
+app/services/*.py (notifications, PDF, auth)
+app/templates/, app/static/
+Add config classes: Dev/Testing/Prod.
+Remove duplicated SQL fragments (department normalization, repeated queries).
+Deliverable: easier to extend, fewer bugs, easier code review.
+Phase 7 — Tests + CI (2–6 days)
+Add pytest:
+auth tests, role transition tests, request lifecycle tests
+permission tests (mentor cannot approve other dept)
+Add CI (GitHub Actions):
+run tests + lint (ruff/flake8) on every push
+Deliverable: “higher standard” proof—regressions get caught automatically.
+Efficiency-first priority order (if time is limited)
+1) Prod safety + config + WSGI
+2) Migrations + indexes
+3) Auth/authorization consistency
+4) CSRF + validation
+5) Refactor + tests
